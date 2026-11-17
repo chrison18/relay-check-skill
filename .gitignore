@@ -1,0 +1,12 @@
+# 检测输出：含完整请求/响应与端点信息，不入库
+probe_out/
+pc_out/
+*.log
+
+# 密钥与环境
+.env
+.env.*
+
+# Python 缓存
+__pycache__/
+*.pyc

@@ -1,0 +1,94 @@
+{
+ "_meta": {
+  "version": "2026-10-01",
+  "note": "渠道识别特征库。每条规则：dim=证据维度，where=匹配位置，pattern=正则（不区分大小写），strength=strong/weak，weight=权重，source=DOC（官方文档）/ OBS（本项目实测）/ HEUR（公开资料或社区经验，本项目未实测），checked=最后核对日期。渠道特征会随官方和中转软件更新而过期，每次使用前核对；发现新特征时请补充并注明来源。",
+  "where": {
+   "header": "响应头，按 'name: value' 逐行匹配（name 为小写）",
+   "error": "非 200 响应的错误体（JSON 序列化后的文本）",
+   "selfreport": "模型复述出的前置内容：S1 复述、S18 前置内容自报、S18 金丝雀回复",
+   "usage_key": "200 响应 usage 中的字段名；min_frac 为至少多少比例的响应出现",
+   "usage_missing": "200 响应 usage 中缺少的字段；min_frac 为至少多少比例的响应缺少",
+   "msg_id": "响应的 id 字段；min_frac 为至少多少比例的响应匹配",
+   "model_field": "响应 model 字段、错误体与模型列表中出现的模型 ID",
+   "special": "由代码实现的组合检查，check 为检查名"
+  }
+ },
+ "channels": {
+  "anthropic": {"name": "Anthropic 官方 API", "layer": "upstream"},
+  "bedrock": {"name": "AWS Bedrock", "layer": "upstream"},
+  "vertex": {"name": "Google Vertex AI", "layer": "upstream"},
+  "azure": {"name": "Microsoft Azure（Foundry）", "layer": "upstream"},
+  "kiro": {"name": "Kiro / Amazon Q（AWS CodeWhisperer）", "layer": "client"},
+  "claude_code": {"name": "Claude Code 订阅账号（号池）", "layer": "client"},
+  "cursor": {"name": "Cursor", "layer": "client"},
+  "windsurf": {"name": "Windsurf（Cascade）", "layer": "client"},
+  "copilot": {"name": "GitHub Copilot", "layer": "client"},
+  "cline": {"name": "Cline", "layer": "client"},
+  "roo": {"name": "Roo Code", "layer": "client"},
+  "augment": {"name": "Augment Code", "layer": "client"},
+  "converter": {"name": "协议转换 / 逆向层（具体产品未知）", "layer": "client"},
+  "newapi": {"name": "new-api / one-api 类聚合网关", "layer": "gateway"},
+  "openrouter": {"name": "OpenRouter", "layer": "gateway"},
+  "litellm": {"name": "LiteLLM 代理", "layer": "gateway"},
+  "cf_aig": {"name": "Cloudflare AI Gateway", "layer": "gateway"}
+ },
+ "rules": [
+  {"id": "anthropic.request_id", "channel": "anthropic", "dim": "headers", "where": "header", "pattern": "^request-id: req_", "strength": "weak", "weight": 1, "source": "DOC：官方 API 响应头 request-id（值以 req_ 开头）；网关可能透传", "checked": "2026-10-01"},
+  {"id": "anthropic.ratelimit", "channel": "anthropic", "dim": "headers", "where": "header", "pattern": "^anthropic-ratelimit-(requests|tokens|input-tokens|output-tokens)-", "strength": "weak", "weight": 1, "source": "DOC：官方限流响应头；可被透传或伪造（例如剩余额度恒为 0），要与真实用量交叉核对", "checked": "2026-10-01"},
+  {"id": "anthropic.org_header", "channel": "anthropic", "dim": "headers", "where": "header", "pattern": "^anthropic-organization-id: ", "strength": "weak", "weight": 1, "source": "HEUR：官方响应中常见的组织 ID 头，本项目未实测", "checked": "2026-10-01"},
+  {"id": "anthropic.error_shape", "channel": "anthropic", "dim": "error", "where": "error", "pattern": "\"type\":\\s*\"error\".*\"request_id\":\\s*\"req_", "strength": "weak", "weight": 1, "source": "DOC：官方错误体为 {type: error, error: {...}, request_id: req_...}", "checked": "2026-10-01"},
+  {"id": "anthropic.models_shape", "channel": "anthropic", "dim": "models", "where": "special", "check": "models_list_official_shape", "strength": "weak", "weight": 1, "source": "DOC / OBS：官方 /v1/models 的条目字段为 created_at、display_name、id、type=model；网关常原样透传", "checked": "2026-10-01"},
+  {"id": "anthropic.usage_fields", "channel": "anthropic", "dim": "usage", "where": "usage_key", "pattern": "^(service_tier|inference_geo)$", "min_frac": 0.05, "strength": "weak", "weight": 1, "source": "OBS：官方形态的 usage 含 service_tier、inference_geo", "checked": "2026-10-01"},
+  {"id": "anthropic.msg_id", "channel": "anthropic", "dim": "ids", "where": "msg_id", "pattern": "^msg_01[A-Za-z0-9]{20,}$", "min_frac": 0.9, "strength": "weak", "weight": 0.5, "source": "OBS：官方消息 ID 形如 msg_01…；中转很容易伪造，只作弱证据", "checked": "2026-10-01"},
+
+  {"id": "bedrock.headers", "channel": "bedrock", "dim": "headers", "where": "header", "pattern": "^x-amzn-bedrock-(invocation-latency|input-token-count|output-token-count): ", "strength": "strong", "weight": 4, "source": "DOC：AWS Bedrock InvokeModel 响应头", "checked": "2026-10-01"},
+  {"id": "bedrock.aws_request_id", "channel": "bedrock", "dim": "headers", "where": "header", "pattern": "^x-amzn-requestid: ", "strength": "weak", "weight": 1, "source": "DOC：所有 AWS 服务都会返回（Kiro / API Gateway 也会），只说明经过 AWS", "checked": "2026-10-01"},
+  {"id": "bedrock.model_id", "channel": "bedrock", "dim": "ids", "where": "model_field", "pattern": "\\b(us\\.|eu\\.|apac\\.|global\\.)?anthropic\\.claude-[a-z0-9.\\-]+", "strength": "strong", "weight": 3, "source": "DOC：Bedrock 的模型 ID 形如 anthropic.claude-…（可带区域前缀与 -v1:0 后缀）", "checked": "2026-10-01"},
+  {"id": "bedrock.error_codes", "channel": "bedrock", "dim": "error", "where": "error", "pattern": "\\b(ValidationException|ThrottlingException|AccessDeniedException|ModelErrorException|ModelNotReadyException|ServiceQuotaExceededException)\\b", "strength": "strong", "weight": 3, "source": "DOC：AWS Bedrock 错误类型名", "checked": "2026-10-01"},
+  {"id": "bedrock.error_text", "channel": "bedrock", "dim": "error", "where": "error", "pattern": "bedrock", "strength": "strong", "weight": 3, "source": "HEUR：错误文本中出现 Bedrock", "checked": "2026-10-01"},
+
+  {"id": "vertex.error_status", "channel": "vertex", "dim": "error", "where": "error", "pattern": "\"status\":\\s*\"(INVALID_ARGUMENT|RESOURCE_EXHAUSTED|PERMISSION_DENIED|NOT_FOUND|FAILED_PRECONDITION|UNAVAILABLE|UNAUTHENTICATED)\"", "strength": "strong", "weight": 3, "source": "DOC：Google API 错误模型 error.status 为 gRPC 风格", "checked": "2026-10-01"},
+  {"id": "vertex.model_id", "channel": "vertex", "dim": "ids", "where": "model_field", "pattern": "\\bclaude-[a-z0-9\\-]+@\\d{8}\\b", "strength": "strong", "weight": 3, "source": "DOC：Vertex AI 的 Claude 模型版本名形如 claude-…@YYYYMMDD", "checked": "2026-10-01"},
+  {"id": "vertex.error_text", "channel": "vertex", "dim": "error", "where": "error", "pattern": "aiplatform\\.googleapis\\.com|vertex ?ai", "strength": "strong", "weight": 3, "source": "HEUR：错误文本中出现 Vertex 的服务域名", "checked": "2026-10-01"},
+  {"id": "vertex.goog_header", "channel": "vertex", "dim": "headers", "where": "header", "pattern": "^x-goog-", "strength": "weak", "weight": 1, "source": "HEUR：Google 前端常见的 x-goog-* 响应头，本项目未实测", "checked": "2026-10-01"},
+
+  {"id": "azure.apim", "channel": "azure", "dim": "headers", "where": "header", "pattern": "^apim-request-id: ", "strength": "weak", "weight": 2, "source": "HEUR：Azure API Management 响应头", "checked": "2026-10-01"},
+  {"id": "azure.ms_headers", "channel": "azure", "dim": "headers", "where": "header", "pattern": "^x-ms-(region|client-request-id|request-id|deployment-name): ", "strength": "weak", "weight": 2, "source": "HEUR：Azure 服务常见的 x-ms-* 响应头", "checked": "2026-10-01"},
+  {"id": "azure.azureml", "channel": "azure", "dim": "headers", "where": "header", "pattern": "^azureml-model-", "strength": "strong", "weight": 3, "source": "HEUR：Azure ML / Foundry 部署的响应头", "checked": "2026-10-01"},
+  {"id": "azure.error_text", "channel": "azure", "dim": "error", "where": "error", "pattern": "\\b(azure|foundry|cognitiveservices)\\b", "strength": "strong", "weight": 3, "source": "HEUR：错误文本中出现 Azure / Foundry", "checked": "2026-10-01"},
+
+  {"id": "kiro.selfreport", "channel": "kiro", "dim": "prompt", "where": "selfreport", "pattern": "you are kiro\\b", "strength": "strong", "weight": 5, "source": "OBS：某中转端点实测，模型复述出注入的系统提示开头 \"You are Kiro, an AI-powered development environment.\"（2026-10-01）", "checked": "2026-10-01"},
+  {"id": "kiro.selfreport2", "channel": "kiro", "dim": "prompt", "where": "selfreport", "pattern": "ai-powered development environment", "strength": "strong", "weight": 3, "source": "OBS：同上", "checked": "2026-10-01"},
+  {"id": "kiro.amazon_q", "channel": "kiro", "dim": "prompt", "where": "selfreport", "pattern": "you are amazon q\\b|codewhisperer", "strength": "strong", "weight": 4, "source": "HEUR：Amazon Q / CodeWhisperer 的系统提示开头", "checked": "2026-10-01"},
+  {"id": "kiro.credit_usage", "channel": "kiro", "dim": "usage", "where": "usage_key", "pattern": "^credit_(usage|unit|unit_plural)$", "min_frac": 0.05, "strength": "weak", "weight": 2, "source": "OBS：与 Kiro 自述在同一端点同时观测到，usage 中出现按 credit 计费的字段（官方 API 没有）；归属 Kiro 是推断", "checked": "2026-10-01"},
+  {"id": "kiro.error_text", "channel": "kiro", "dim": "error", "where": "error", "pattern": "codewhisperer|q\\.[a-z0-9\\-]+\\.amazonaws\\.com|\\bkiro\\b", "strength": "strong", "weight": 4, "source": "HEUR：错误文本中出现 CodeWhisperer / Amazon Q 服务域名 / Kiro", "checked": "2026-10-01"},
+
+  {"id": "claude_code.selfreport", "channel": "claude_code", "dim": "prompt", "where": "selfreport", "pattern": "you are claude code, anthropic'?s official cli", "strength": "strong", "weight": 5, "source": "OBS：历史测试中中转注入的身份句（手册 M1、M2）", "checked": "2026-10-01"},
+  {"id": "claude_code.unified_ratelimit", "channel": "claude_code", "dim": "headers", "where": "header", "pattern": "^anthropic-ratelimit-unified-", "strength": "weak", "weight": 2, "source": "HEUR：订阅账号（OAuth）请求返回的统一限流头，本项目未实测", "checked": "2026-10-01"},
+
+  {"id": "cursor.selfreport", "channel": "cursor", "dim": "prompt", "where": "selfreport", "pattern": "\\bin cursor\\b|cursor, the world'?s best ide|\\bcursor ide\\b", "strength": "strong", "weight": 4, "source": "HEUR：公开流传的 Cursor 系统提示", "checked": "2026-10-01"},
+  {"id": "windsurf.selfreport", "channel": "windsurf", "dim": "prompt", "where": "selfreport", "pattern": "you are cascade\\b|\\bwindsurf\\b", "strength": "strong", "weight": 4, "source": "HEUR：公开流传的 Windsurf / Cascade 系统提示", "checked": "2026-10-01"},
+  {"id": "copilot.selfreport", "channel": "copilot", "dim": "prompt", "where": "selfreport", "pattern": "github copilot", "strength": "strong", "weight": 4, "source": "HEUR：公开流传的 GitHub Copilot 系统提示", "checked": "2026-10-01"},
+  {"id": "cline.selfreport", "channel": "cline", "dim": "prompt", "where": "selfreport", "pattern": "you are cline\\b", "strength": "strong", "weight": 4, "source": "HEUR：Cline 开源的系统提示开头", "checked": "2026-10-01"},
+  {"id": "roo.selfreport", "channel": "roo", "dim": "prompt", "where": "selfreport", "pattern": "you are roo\\b", "strength": "strong", "weight": 4, "source": "HEUR：Roo Code 开源的系统提示开头", "checked": "2026-10-01"},
+  {"id": "augment.selfreport", "channel": "augment", "dim": "prompt", "where": "selfreport", "pattern": "augment agent|augment code", "strength": "strong", "weight": 4, "source": "HEUR：公开流传的 Augment 系统提示", "checked": "2026-10-01"},
+
+  {"id": "converter.no_thinking_details", "channel": "converter", "dim": "usage", "where": "usage_missing", "pattern": "^output_tokens_details$", "min_frac": 0.2, "strength": "weak", "weight": 2, "source": "OBS：官方形态的 usage 都带 output_tokens_details；大量缺失说明 usage 被转换层重建", "checked": "2026-10-01"},
+  {"id": "converter.fixed_sig_len", "channel": "converter", "dim": "signature", "where": "special", "check": "fixed_signature_length", "strength": "weak", "weight": 2, "source": "OBS：大量 thinking 签名长度完全相同、不随思考量变化（手册 M3 实例 c）", "checked": "2026-10-01"},
+  {"id": "converter.sig_not_validated", "channel": "converter", "dim": "signature", "where": "special", "check": "signature_not_validated", "strength": "weak", "weight": 2, "source": "OBS：伪造或篡改的签名得到 200（S3 SIGNATURE_NOT_VALIDATED）", "checked": "2026-10-01"},
+
+  {"id": "newapi.request_id", "channel": "newapi", "dim": "headers", "where": "header", "pattern": "^x-oneapi-request-id: ", "strength": "strong", "weight": 4, "source": "OBS：new-api / one-api 网关的响应头", "checked": "2026-10-01"},
+  {"id": "newapi.version", "channel": "newapi", "dim": "headers", "where": "header", "pattern": "^x-new-api-version: ", "strength": "strong", "weight": 4, "source": "OBS：new-api 的版本响应头", "checked": "2026-10-01"},
+  {"id": "newapi.error_type", "channel": "newapi", "dim": "error", "where": "error", "pattern": "\"type\":\\s*\"(new_api_error|one_api_error)\"", "strength": "strong", "weight": 4, "source": "OBS：new-api 的错误类型 new_api_error（one-api 为 one_api_error，HEUR）", "checked": "2026-10-01"},
+  {"id": "newapi.no_channel", "channel": "newapi", "dim": "error", "where": "error", "pattern": "no available channel for model|无可用渠道", "strength": "strong", "weight": 3, "source": "OBS：请求不存在的模型时 new-api 的报错", "checked": "2026-10-01"},
+
+  {"id": "openrouter.error_text", "channel": "openrouter", "dim": "error", "where": "error", "pattern": "openrouter", "strength": "strong", "weight": 3, "source": "HEUR：错误文本中出现 OpenRouter", "checked": "2026-10-01"},
+  {"id": "openrouter.gen_id", "channel": "openrouter", "dim": "ids", "where": "msg_id", "pattern": "^gen-[0-9]{6,}", "min_frac": 0.5, "strength": "strong", "weight": 3, "source": "HEUR：OpenRouter 的生成 ID 形如 gen-<时间戳>-…", "checked": "2026-10-01"},
+  {"id": "openrouter.usage_cost", "channel": "openrouter", "dim": "usage", "where": "usage_key", "pattern": "^(cost|is_byok)$", "min_frac": 0.5, "strength": "weak", "weight": 2, "source": "HEUR：OpenRouter 的 usage 带 cost 等字段", "checked": "2026-10-01"},
+
+  {"id": "litellm.headers", "channel": "litellm", "dim": "headers", "where": "header", "pattern": "^x-litellm-", "strength": "strong", "weight": 4, "source": "HEUR：LiteLLM 代理的 x-litellm-* 响应头", "checked": "2026-10-01"},
+  {"id": "litellm.error_text", "channel": "litellm", "dim": "error", "where": "error", "pattern": "litellm", "strength": "strong", "weight": 3, "source": "HEUR：错误文本中出现 LiteLLM", "checked": "2026-10-01"},
+
+  {"id": "cf_aig.headers", "channel": "cf_aig", "dim": "headers", "where": "header", "pattern": "^cf-aig-", "strength": "strong", "weight": 3, "source": "HEUR：Cloudflare AI Gateway 的 cf-aig-* 响应头", "checked": "2026-10-01"}
+ ]
+}
